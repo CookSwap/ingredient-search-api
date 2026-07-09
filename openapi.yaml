@@ -1,0 +1,345 @@
+openapi: 3.1.0
+info:
+  title: CookSwap Ingredient Search API
+  version: 1.0.0
+  description: >
+    Open standard for ingredient-to-product search. Retailers implement this
+    spec; CookSwap — and any other recipe app — calls it to let users buy
+    ingredients directly from recipes.
+
+
+    ## How it works
+
+
+    A recipe app sends an ingredient name (e.g. "unsalted butter"). The retailer
+    returns matching products with name, price, image, and a direct buy link.
+    The app opens that link in the user's browser.
+
+
+    ## Getting listed on CookSwap
+
+
+    Once your implementation passes the validator (see `/examples`), open an
+    issue using the "New Retailer" template and we'll add you to the selector.
+
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  contact:
+    name: CookSwap
+    url: https://cookswap.com
+    email: api@cookswap.com
+
+servers:
+  - url: https://{retailer}/cookswap/v1
+    description: Retailer implementation endpoint
+    variables:
+      retailer:
+        default: api.example-retailer.com
+        description: Retailer's API hostname
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: Products
+    description: Ingredient-to-product search
+  - name: System
+    description: Health and status
+
+paths:
+  /search:
+    get:
+      summary: Search products by ingredient
+      operationId: searchProducts
+      tags:
+        - Products
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Ingredient name to search for (1–200 chars)
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+          example: unsalted butter
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of results to return (1–20)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 5
+        - name: locale
+          in: query
+          required: false
+          description: BCP 47 locale for language and region
+          schema:
+            type: string
+            default: en-GB
+          example: en-GB
+      responses:
+        "200":
+          description: Matching products
+          headers:
+            X-RateLimit-Limit:
+              description: Requests allowed per window
+              schema:
+                type: integer
+            X-RateLimit-Remaining:
+              description: Requests remaining in current window
+              schema:
+                type: integer
+            X-RateLimit-Reset:
+              description: Unix timestamp when the window resets
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+              example:
+                query: unsalted butter
+                retailer: example-retailer
+                total: 14
+                results:
+                  - id: SKU-004821
+                    name: Anchor Unsalted Butter 250g
+                    brand: Anchor
+                    unit: 250g
+                    in_stock: true
+                    price:
+                      amount: 1.89
+                      currency: GBP
+                      unit_price: £7.56/kg
+                    image_url: https://cdn.example.com/products/SKU-004821.jpg
+                    buy_url: https://www.example-retailer.com/products/SKU-004821
+                    tags:
+                      - vegetarian
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /health:
+    get:
+      summary: Health check
+      description: >
+        Returns service status. Recipe apps poll this before surfacing a Buy
+        option — if degraded or unreachable, they fall back to a deep-link
+        search. No API key required.
+      operationId: healthCheck
+      tags:
+        - System
+      security: []
+      responses:
+        "200":
+          description: Service health status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: ok
+                version: 1.0.0
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-CookSwap-Key
+      description: >
+        API key issued by the retailer to each authorised client application.
+        Keys should be revocable per client so access can be managed
+        independently.
+
+  schemas:
+    SearchResponse:
+      type: object
+      required:
+        - query
+        - results
+        - total
+      properties:
+        query:
+          type: string
+          description: Normalised query string as processed by the retailer
+          example: unsalted butter
+        retailer:
+          type: string
+          description: Retailer identifier (your slug, e.g. "tesco")
+          example: example-retailer
+        total:
+          type: integer
+          description: Total matching products — may exceed the results array length
+          example: 14
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/Product"
+
+    Product:
+      type: object
+      required:
+        - id
+        - name
+        - buy_url
+      properties:
+        id:
+          type: string
+          description: Your internal product identifier
+          example: SKU-004821
+        name:
+          type: string
+          description: Full product name including variant and size
+          example: Anchor Unsalted Butter 250g
+        brand:
+          type: string
+          description: Brand name; omit for own-label products
+          example: Anchor
+        price:
+          $ref: "#/components/schemas/Price"
+        unit:
+          type: string
+          description: Pack size or weight descriptor
+          example: 250g
+        image_url:
+          type: string
+          format: uri
+          description: Product image URL, served over HTTPS
+          example: https://cdn.example.com/products/SKU-004821.jpg
+        buy_url:
+          type: string
+          format: uri
+          description: >
+            Direct URL to the product page or add-to-basket flow. May include
+            your own affiliate or tracking parameters — the calling app will
+            not strip them.
+          example: https://www.example-retailer.com/products/SKU-004821
+        in_stock:
+          type: boolean
+          description: Current stock availability
+          example: true
+        tags:
+          type: array
+          description: Dietary and lifestyle tags
+          items:
+            type: string
+            enum:
+              - organic
+              - vegan
+              - vegetarian
+              - gluten-free
+              - dairy-free
+
+    Price:
+      type: object
+      required:
+        - amount
+        - currency
+      properties:
+        amount:
+          type: number
+          format: float
+          description: Price as a decimal number
+          example: 1.89
+        currency:
+          type: string
+          description: ISO 4217 currency code
+          example: GBP
+        unit_price:
+          type: string
+          description: Shelf unit price label for comparison display
+          example: £7.56/kg
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - degraded
+          description: >
+            "ok" — all systems normal. "degraded" — search is available but
+            impaired (slow, partial results). Use a separate status page for
+            full outages.
+          example: ok
+        version:
+          type: string
+          description: Spec version this implementation targets
+          example: 1.0.0
+
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code
+          example: INVALID_QUERY
+        message:
+          type: string
+          description: Human-readable description of the error
+          example: q parameter is required
+        details:
+          type: string
+          description: Optional extra context for debugging
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: INVALID_QUERY
+            message: q parameter is required
+
+    Unauthorized:
+      description: Missing or invalid API key
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: UNAUTHORIZED
+            message: Invalid or missing X-CookSwap-Key header
+
+    RateLimited:
+      description: Rate limit exceeded
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: RATE_LIMITED
+            message: Too many requests
+
+    ServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: INTERNAL_ERROR
+            message: An unexpected error occurred
