@@ -81,6 +81,20 @@ paths:
             type: string
             default: en-GB
           example: en-GB
+        - name: country
+          in: query
+          required: false
+          description: >
+            ISO 3166-1 alpha-2 country code of the user making the request.
+            Retailers should use this to filter results to locally available
+            products, return prices in the appropriate currency, and rank
+            regional brands appropriately. If omitted, infer from locale or
+            default to the retailer's primary market.
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 2
+          example: AU
       responses:
         "200":
           description: Matching products
@@ -177,6 +191,10 @@ components:
           type: string
           description: Retailer identifier (your slug, e.g. "tesco")
           example: example-retailer
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2 country code used to filter results
+          example: AU
         total:
           type: integer
           description: Total matching products — may exceed the results array length
