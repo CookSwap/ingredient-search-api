@@ -21,6 +21,23 @@ X-CookSwap-Key: <your-key>
 → { results: [{ name, price, image_url, buy_url, ... }] }
 ```
 
+**CookSwap does not replace your ecommerce platform. It sends customers directly to your existing product pages.**
+
+---
+
+## Why retailers implement this
+
+This is not a data-sharing agreement. You control exactly what products are returned, how they are ranked, and where the buy link points. The standard defines the interface — your catalogue, your pricing, your pages.
+
+| Benefit | Detail |
+|---|---|
+| **New customer acquisition** | Recipe users are in active meal-planning mode — high purchase intent, not casual browsing |
+| **Recipe discovery traffic** | Your products appear inside the cooking experience, not after a separate shopping trip |
+| **Reduced search friction** | Users arrive at your product page with one tap, not via a generic search that may return competitors |
+| **Basket conversion** | Ingredient-by-ingredient shopping naturally builds a multi-item basket |
+| **Brand-controlled placement** | You decide which products surface — own-label, promoted lines, or full catalogue |
+| **No marketplace intermediary** | No commission to a third-party platform. The user is yours from the moment they tap |
+
 ---
 
 ## Endpoints
@@ -54,6 +71,28 @@ X-RateLimit-Reset:     1720523400
 **5. Respond within 2 seconds** — calling apps time out at 3 s.
 
 See [`examples/`](./examples/) for reference implementations in PHP, Node.js, and Python.
+
+---
+
+## Structured ingredient context (v1.1 draft)
+
+A plain text query (`q=butter`) works for simple cases. For better matching, apps may pass structured ingredient context as additional parameters, allowing retailers to rank results more precisely:
+
+```
+GET /cookswap/v1/search
+  ?q=butter
+  &quantity=250
+  &unit=g
+  &dietary=vegetarian
+  &recipe_role=baking
+```
+
+This helps resolve ambiguities like:
+- `flour` → plain, self-raising, or bread flour? (`recipe_role=baking` hints at plain)
+- `cream` → single, double, or whipping? (quantity and recipe role help)
+- `chicken breast` → fresh, frozen, organic? (dietary tags help)
+
+These parameters are **optional** in v1.0 and ignored if not understood. The structured vocabulary will be formalised in v1.1. Feedback welcome — open an issue.
 
 ---
 
@@ -92,9 +131,17 @@ You issue API keys to client apps (one key per app). Send the key in the `X-Cook
 
 ---
 
-## Affiliate links
+## Attribution and referral tracking
 
-You may embed your own affiliate or tracking parameters in `buy_url` — calling apps will not strip or modify them. If you'd like CookSwap to append its own affiliate tag, agree the parameter name during onboarding.
+You may embed your own tracking or referral parameters in `buy_url` — calling apps will not strip or modify them. Commercial arrangements between retailers and app developers are outside the scope of this spec; possible models include:
+
+- **Referral tracking** — tag the URL and measure attributed sales in your own analytics
+- **Affiliate commission** — pay a percentage of referred basket value
+- **Sponsored placement** — promote specific products in search results
+- **Retailer subscription** — a flat fee for premium placement across all adopting apps
+- **Analytics service** — aggregate recipe-to-basket data as a commercial product
+
+The spec is commercially neutral. How you monetise the traffic is your decision.
 
 ---
 
@@ -116,6 +163,12 @@ You may embed your own affiliate or tracking parameters in `buy_url` — calling
 Once your implementation is live, open an issue using the **New Retailer** template. We'll validate your endpoint and add you to the retailer selector in the CookSwap app.
 
 Contact: [api@cookswap.com](mailto:api@cookswap.com)
+
+---
+
+## The standards play
+
+This spec is to recipe-to-basket what Open Banking is to financial data — a common interface that lets retailers appear inside third-party experiences without giving up control of their ecommerce platform. One implementation; every adopting app. The alternative is every retailer negotiating bespoke integrations with every recipe app, indefinitely.
 
 ---
 
