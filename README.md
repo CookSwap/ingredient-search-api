@@ -168,7 +168,7 @@ Contact: [api@cookswap.com](mailto:api@cookswap.com)
 
 ## The standards play
 
-This spec is to recipe-to-basket what Open Banking is to financial data — a common interface that lets retailers appear inside third-party experiences without giving up control of their ecommerce platform. One implementation; every adopting app. The alternative is every retailer negotiating bespoke integrations with every recipe app, indefinitely.
+This spec applies the same principle as Open Banking: a common interface that allows third-party experiences while keeping the underlying provider in control. Retailers implement it once; every recipe app that adopts the standard can connect to their catalogue without a separate commercial agreement for each one. The alternative is every retailer negotiating bespoke integrations with every recipe app, indefinitely.
 
 ---
 
