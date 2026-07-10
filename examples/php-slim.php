@@ -32,13 +32,32 @@ $app->add(function (Request $req, $handler) {
     return $handler->handle($req);
 });
 
-// ── Rate-limit headers middleware ─────────────────────────────────────────────
+// ── Rate-limit middleware (sliding window per key, APCu) ──────────────────────
+// Requires APCu (pecl install apcu). Falls back gracefully if unavailable.
 $app->add(function (Request $req, $handler) {
+    $key    = $req->getHeaderLine('X-CookSwap-Key');
+    $window = 60;
+    $limit  = 60;
+    $remaining = $limit - 1;
+
+    if (function_exists('apcu_fetch')) {
+        $cache_key = 'rl_' . hash('sha256', $key);
+        $count     = apcu_fetch($cache_key, $exists);
+        if ($exists) {
+            $count++;
+            apcu_store($cache_key, $count, $window);
+        } else {
+            $count = 1;
+            apcu_store($cache_key, 1, $window);
+        }
+        $remaining = max(0, $limit - $count);
+    }
+
     $res = $handler->handle($req);
     return $res
-        ->withHeader('X-RateLimit-Limit',     '60')
-        ->withHeader('X-RateLimit-Remaining', '59')   // replace with real counter
-        ->withHeader('X-RateLimit-Reset',     (string)(time() + 60));
+        ->withHeader('X-RateLimit-Limit',     (string)$limit)
+        ->withHeader('X-RateLimit-Remaining', (string)$remaining)
+        ->withHeader('X-RateLimit-Reset',     (string)(time() + $window));
 });
 
 // ── GET /cookswap/v1/search ───────────────────────────────────────────────────
@@ -79,8 +98,9 @@ $app->run();
 
 function validKey(string $key): bool
 {
-    // Replace with a lookup against your issued keys
-    return $key === getenv('COOKSWAP_API_KEY');
+    $valid = getenv('COOKSWAP_API_KEY');
+    if (!$valid || $key === '') return false;
+    return hash_equals($valid, $key);
 }
 
 function search(string $q, int $limit): array
@@ -100,7 +120,7 @@ function search(string $q, int $limit): array
             'brand'     => 'Example Brand',
             'unit'      => '250g',
             'in_stock'  => true,
-            'price'     => ['amount' => 1.89, 'currency' => 'GBP', 'unit_price' => '£7.56/kg'],
+            'price'     => ['amount_minor' => 189, 'currency' => 'GBP', 'unit_price' => '£7.56/kg'],
             'image_url' => 'https://cdn.your-retailer.com/SKU-004821.jpg',
             'buy_url'   => 'https://www.your-retailer.com/products/SKU-004821',
             'tags'      => ['vegetarian'],

@@ -90,4 +90,10 @@ class MockAdapter implements RetailerAdapter
             'buy_url'  => 'https://www.example-retailer.com/search?q=' . urlencode($q),
         ]];
     }
+
+    public function addToBasket(string $product_id, int $quantity): ?array
+    {
+        // Mock retailers don't support basket integration
+        return null;
+    }
 }

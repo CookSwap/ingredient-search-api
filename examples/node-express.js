@@ -6,25 +6,52 @@
  */
 
 const express = require('express');
+const crypto  = require('crypto');
 const app     = express();
 
 const RETAILER_SLUG = 'your-retailer';
-const VALID_KEYS    = new Set([process.env.COOKSWAP_API_KEY]);
+const VALID_KEY     = process.env.COOKSWAP_API_KEY || '';
 
-// ── Rate-limit headers (add real counters per key in production) ──────────────
+function timingSafeKeyCheck(key) {
+  if (!VALID_KEY || !key) return false;
+  const a = Buffer.from(key);
+  const b = Buffer.from(VALID_KEY);
+  if (a.length !== b.length) {
+    // Still do a compare to avoid length-based timing leak
+    crypto.timingSafeEqual(Buffer.alloc(b.length), b);
+    return false;
+  }
+  return crypto.timingSafeEqual(a, b);
+}
+
+// ── Rate-limit (sliding window per key, in-process Map — use Redis in prod) ───
+const rateLimits = new Map();
+const LIMIT = 60, WINDOW_MS = 60_000;
+
 app.use((req, res, next) => {
+  const key   = req.headers['x-cookswap-key'] || req.ip;
+  const now   = Date.now();
+  const entry = rateLimits.get(key) || { count: 0, reset: now + WINDOW_MS };
+  if (now > entry.reset) { entry.count = 0; entry.reset = now + WINDOW_MS; }
+  entry.count++;
+  rateLimits.set(key, entry);
+  const remaining = Math.max(0, LIMIT - entry.count);
   res.set({
-    'X-RateLimit-Limit':     '60',
-    'X-RateLimit-Remaining': '59',
-    'X-RateLimit-Reset':     String(Math.floor(Date.now() / 1000) + 60),
+    'X-RateLimit-Limit':     String(LIMIT),
+    'X-RateLimit-Remaining': String(remaining),
+    'X-RateLimit-Reset':     String(Math.floor(entry.reset / 1000)),
   });
+  if (entry.count > LIMIT) {
+    res.set('Retry-After', String(Math.ceil((entry.reset - now) / 1000)));
+    return res.status(429).json({ code: 'RATE_LIMITED', message: 'Too many requests' });
+  }
   next();
 });
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
 function requireKey(req, res, next) {
-  const key = req.headers['x-cookswap-key'];
-  if (!key || !VALID_KEYS.has(key)) {
+  const key = req.headers['x-cookswap-key'] || '';
+  if (!timingSafeKeyCheck(key)) {
     return res.status(401).json({ code: 'UNAUTHORIZED', message: 'Invalid or missing X-CookSwap-Key header' });
   }
   next();
@@ -74,7 +101,7 @@ async function search(q, limit) {
       brand:     'Example Brand',
       unit:      '250g',
       in_stock:  true,
-      price:     { amount: 1.89, currency: 'GBP', unit_price: '£7.56/kg' },
+      price:     { amount_minor: 189, currency: 'GBP', unit_price: '£7.56/kg' },
       image_url: 'https://cdn.your-retailer.com/SKU-004821.jpg',
       buy_url:   'https://www.your-retailer.com/products/SKU-004821',
       tags:      ['vegetarian'],

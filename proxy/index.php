@@ -26,20 +26,28 @@ header('X-Powered-By: CookSwap-Ingredient-API/1.0');
 
 require_once __DIR__ . '/adapters/RetailerAdapter.php';
 require_once __DIR__ . '/adapters/MockAdapter.php';
+require_once __DIR__ . '/adapters/GreenfieldAdapter.php';
+require_once __DIR__ . '/adapters/PriceRightAdapter.php';
+require_once __DIR__ . '/adapters/FreshMarketAdapter.php';
 // Uncomment as real adapters are built:
 // require_once __DIR__ . '/adapters/TescoAdapter.php';
 // require_once __DIR__ . '/adapters/OcadoAdapter.php';
-// require_once __DIR__ . '/adapters/SainsburysAdapter.php';
 
 // ── Registry ──────────────────────────────────────────────────────────────────
 const ADAPTERS = [
-    'tesco'      => MockAdapter::class,   // swap to TescoAdapter::class when ready
-    'ocado'      => MockAdapter::class,
-    'sainsburys' => MockAdapter::class,
-    'asda'       => MockAdapter::class,
-    'morrisons'  => MockAdapter::class,
-    'waitrose'   => MockAdapter::class,
-    'demo'       => MockAdapter::class,
+    // Fictional demo retailers — full product catalogs
+    'greenfields'  => GreenfieldAdapter::class,
+    'priceright'   => PriceRightAdapter::class,
+    'freshmarket'  => FreshMarketAdapter::class,
+    // Generic mock
+    'demo'         => MockAdapter::class,
+    // Real retailer stubs (mock data until official adapters built)
+    'tesco'        => MockAdapter::class,
+    'ocado'        => MockAdapter::class,
+    'sainsburys'   => MockAdapter::class,
+    'asda'         => MockAdapter::class,
+    'morrisons'    => MockAdapter::class,
+    'waitrose'     => MockAdapter::class,
 ];
 
 // ── Affiliate config ──────────────────────────────────────────────────────────
@@ -53,10 +61,68 @@ define('VALID_KEYS', array_filter(explode(',', getenv('CS_API_KEYS') ?: 'demo-ke
 
 // ── Routing ───────────────────────────────────────────────────────────────────
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$path = rtrim(preg_replace('#^/cookswap/v1#', '', $path), '/') ?: '/';
+// Strip optional /cookswap/v1 prefix (for subdirectory deploys) or /v1 prefix
+$path = preg_replace('#^(/cookswap/v1|/v1)#', '', $path);
+$path = rtrim($path, '/') ?: '/';
 
 if ($path === '/health') {
     echo json_encode(['status' => 'ok', 'version' => '1.0.0', 'adapters' => array_keys(ADAPTERS)]);
+    exit;
+}
+
+if ($path === '/basket/add') {
+    // Auth
+    $key = $_SERVER['HTTP_X_COOKSWAP_KEY'] ?? '';
+    if (!in_array($key, VALID_KEYS, true)) {
+        http_response_code(401);
+        echo json_encode(['code' => 'UNAUTHORIZED', 'message' => 'Invalid or missing X-CookSwap-Key header']);
+        exit;
+    }
+
+    $body      = json_decode(file_get_contents('php://input'), true) ?? [];
+    $product_id = trim($body['product_id'] ?? '');
+    $quantity   = max(1, min(99, (int)($body['quantity'] ?? 1)));
+    $retailer   = strtolower(trim($_GET['retailer'] ?? 'demo'));
+
+    if (!$product_id) {
+        http_response_code(400);
+        echo json_encode(['code' => 'INVALID_REQUEST', 'message' => 'product_id is required']);
+        exit;
+    }
+
+    if (!array_key_exists($retailer, ADAPTERS)) {
+        http_response_code(400);
+        echo json_encode(['code' => 'UNKNOWN_RETAILER', 'message' => "Unknown retailer '$retailer'"]);
+        exit;
+    }
+
+    try {
+        $adapterClass = ADAPTERS[$retailer];
+        $adapter      = new $adapterClass($retailer, 'en-GB');
+        $result       = $adapter->addToBasket($product_id, $quantity);
+
+        if ($result === null) {
+            http_response_code(501);
+            echo json_encode([
+                'code'    => 'NOT_IMPLEMENTED',
+                'message' => 'Basket API not available for this retailer — use buy_url from /search instead',
+            ]);
+            exit;
+        }
+
+        // Inject affiliate param into checkout_url
+        if (!empty($result['checkout_url'])) {
+            $sep = str_contains($result['checkout_url'], '?') ? '&' : '?';
+            $result['checkout_url'] .= $sep . CS_AFFILIATE_PARAM . '=' . urlencode(CS_AFFILIATE_ID);
+        }
+
+        echo json_encode($result, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['code' => 'INTERNAL_ERROR', 'message' => 'An unexpected error occurred']);
+        error_log('[CookSwap proxy basket] ' . $e->getMessage());
+    }
     exit;
 }
 

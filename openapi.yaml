@@ -126,7 +126,7 @@ paths:
                     unit: 250g
                     in_stock: true
                     price:
-                      amount: 1.89
+                      amount_minor: 189
                       currency: GBP
                       unit_price: £7.56/kg
                     image_url: https://cdn.example.com/products/SKU-004821.jpg
@@ -137,6 +137,77 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /basket/add:
+    post:
+      summary: Add a product to the user's basket
+      description: >
+        Adds a single product to the retailer's basket and returns a one-time
+        checkout URL. The calling app redirects the user to that URL — they
+        land directly in the retailer's checkout flow with the item pre-loaded.
+
+
+        No payment data or credentials are exchanged with the calling app.
+        The retailer controls the entire checkout experience.
+
+
+        This endpoint is optional. Retailers that do not implement it should
+        return 501 Not Implemented. Recipe apps must fall back gracefully to
+        the `buy_url` from `/search` when this endpoint is absent or returns
+        an error.
+
+
+        **This endpoint requires retailer approval** — the retailer decides
+        whether to grant basket access to a given API key.
+      operationId: addToBasket
+      tags:
+        - Basket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BasketAddRequest"
+            example:
+              product_id: SKU-004821
+              quantity: 1
+      responses:
+        "200":
+          description: Product added — checkout URL ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BasketAddResponse"
+              example:
+                checkout_url: https://www.example-retailer.com/checkout?token=abc123xyz&expires=1720000000
+                basket_id: bsk_abc123
+                expires_at: 1720000000
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Product not found or out of stock
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: PRODUCT_NOT_FOUND
+                message: No product found with id SKU-004821
+        "501":
+          description: Basket integration not available for this retailer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: NOT_IMPLEMENTED
+                message: Basket API not available — use buy_url from /search instead
         "429":
           $ref: "#/components/responses/RateLimited"
         "500":
@@ -261,14 +332,16 @@ components:
     Price:
       type: object
       required:
-        - amount
+        - amount_minor
         - currency
       properties:
-        amount:
-          type: number
-          format: float
-          description: Price as a decimal number
-          example: 1.89
+        amount_minor:
+          type: integer
+          description: >
+            Price in the currency's minor unit (e.g. pence for GBP, cents for USD).
+            Use integer arithmetic to avoid floating-point rounding errors.
+            Divide by 100 to display: 189 → £1.89.
+          example: 189
         currency:
           type: string
           description: ISO 4217 currency code
@@ -277,6 +350,47 @@ components:
           type: string
           description: Shelf unit price label for comparison display
           example: £7.56/kg
+
+    BasketAddRequest:
+      type: object
+      required:
+        - product_id
+        - quantity
+      properties:
+        product_id:
+          type: string
+          description: Product identifier from the /search results
+          example: SKU-004821
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 99
+          default: 1
+          description: Number of units to add
+          example: 1
+
+    BasketAddResponse:
+      type: object
+      required:
+        - checkout_url
+      properties:
+        checkout_url:
+          type: string
+          format: uri
+          description: >
+            One-time URL that drops the user into the retailer's checkout
+            with the item pre-loaded. Valid for a short period (typically
+            15–60 minutes). The calling app should redirect the user
+            immediately.
+          example: https://www.example-retailer.com/checkout?token=abc123xyz
+        basket_id:
+          type: string
+          description: Retailer's internal basket reference (for support queries)
+          example: bsk_abc123
+        expires_at:
+          type: integer
+          description: Unix timestamp when the checkout URL expires
+          example: 1720000000
 
     HealthResponse:
       type: object
