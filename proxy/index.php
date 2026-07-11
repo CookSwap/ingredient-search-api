@@ -21,7 +21,8 @@
  */
 
 header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
+// Server-to-server only — recipe app backend calls this proxy, key never in browser.
+// If browser calls are ever needed, replace with an origin allowlist + short-lived tokens.
 header('X-Powered-By: CookSwap-Ingredient-API/1.0');
 
 require_once __DIR__ . '/adapters/RetailerAdapter.php';
@@ -57,7 +58,61 @@ define('CS_AFFILIATE_PARAM', getenv('CS_AFFILIATE_PARAM') ?: 'cs_ref');
 define('CS_AFFILIATE_ID',    getenv('CS_AFFILIATE_ID')    ?: 'cookswap');
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
-define('VALID_KEYS', array_filter(explode(',', getenv('CS_API_KEYS') ?: 'demo-key-12345')));
+// CS_API_KEYS must be set in the server environment — comma-separated.
+// If unset, all authenticated requests are refused. No working default.
+$_raw_keys = getenv('CS_API_KEYS');
+if (!$_raw_keys) {
+    http_response_code(500);
+    echo json_encode(['code' => 'CONFIGURATION_ERROR', 'message' => 'API not configured']);
+    exit;
+}
+define('VALID_KEYS', array_filter(explode(',', $_raw_keys)));
+unset($_raw_keys);
+
+function validKey(string $key): bool
+{
+    foreach (VALID_KEYS as $valid) {
+        if (hash_equals($valid, $key)) return true;
+    }
+    return false;
+}
+
+// ── Rate limiting (APCu sliding window per key) ───────────────────────────────
+function rateLimit(string $key): void
+{
+    $limit  = 60;
+    $window = 60;
+
+    if (!function_exists('apcu_fetch')) {
+        // APCu unavailable — emit headers but don't enforce
+        header('X-RateLimit-Limit: ' . $limit);
+        header('X-RateLimit-Remaining: ' . $limit);
+        header('X-RateLimit-Reset: ' . (time() + $window));
+        return;
+    }
+
+    $cache_key = 'rl_' . hash('sha256', $key ?: 'anon');
+    $count     = apcu_fetch($cache_key, $exists);
+    if ($exists) {
+        $count++;
+        apcu_store($cache_key, $count, $window);
+    } else {
+        $count = 1;
+        apcu_store($cache_key, 1, $window);
+    }
+    $remaining = max(0, $limit - $count);
+
+    header('X-RateLimit-Limit: '     . $limit);
+    header('X-RateLimit-Remaining: ' . $remaining);
+    header('X-RateLimit-Reset: '     . (time() + $window));
+
+    if ($count > $limit) {
+        header('Retry-After: ' . $window);
+        http_response_code(429);
+        echo json_encode(['code' => 'RATE_LIMITED', 'message' => 'Too many requests']);
+        exit;
+    }
+}
 
 // ── Routing ───────────────────────────────────────────────────────────────────
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
@@ -73,13 +128,15 @@ if ($path === '/health') {
 if ($path === '/basket/add') {
     // Auth
     $key = $_SERVER['HTTP_X_COOKSWAP_KEY'] ?? '';
-    if (!in_array($key, VALID_KEYS, true)) {
+    if (!validKey($key)) {
         http_response_code(401);
         echo json_encode(['code' => 'UNAUTHORIZED', 'message' => 'Invalid or missing X-CookSwap-Key header']);
         exit;
     }
 
-    $body      = json_decode(file_get_contents('php://input'), true) ?? [];
+    rateLimit($key);
+
+    $body       = json_decode(file_get_contents('php://input'), true) ?? [];
     $product_id = trim($body['product_id'] ?? '');
     $quantity   = max(1, min(99, (int)($body['quantity'] ?? 1)));
     $retailer   = strtolower(trim($_GET['retailer'] ?? 'demo'));
@@ -134,7 +191,7 @@ if ($path !== '/search') {
 
 // ── Auth check ────────────────────────────────────────────────────────────────
 $key = $_SERVER['HTTP_X_COOKSWAP_KEY'] ?? '';
-if (!in_array($key, VALID_KEYS, true)) {
+if (!validKey($key)) {
     http_response_code(401);
     echo json_encode(['code' => 'UNAUTHORIZED', 'message' => 'Invalid or missing X-CookSwap-Key header']);
     exit;
@@ -161,21 +218,21 @@ if (!array_key_exists($retailer, ADAPTERS)) {
     exit;
 }
 
-// ── Rate limit headers (add real counter per key in production) ───────────────
-header('X-RateLimit-Limit: 60');
-header('X-RateLimit-Remaining: 59');
-header('X-RateLimit-Reset: ' . (time() + 60));
+rateLimit($key);
 
 // ── Call adapter ──────────────────────────────────────────────────────────────
+$q_normalised = strtolower($q); // normalised form used for search and echoed in response
 try {
     $adapterClass = ADAPTERS[$retailer];
     /** @var RetailerAdapter $adapter */
-    $adapter = new $adapterClass($retailer, $locale);
-    $products = $adapter->search(strtolower($q), $limit);
+    $adapter  = new $adapterClass($retailer, $locale);
+    $products = $adapter->search($q_normalised, $limit);
 
-    // ── Inject affiliate token into every buy_url ─────────────────────────────
+    // ── Validate and inject affiliate token into every buy_url ────────────────
     foreach ($products as &$product) {
         if (!empty($product['buy_url'])) {
+            $scheme = parse_url($product['buy_url'], PHP_URL_SCHEME);
+            if (!in_array($scheme, ['http', 'https'], true)) continue; // block javascript: etc.
             $sep = str_contains($product['buy_url'], '?') ? '&' : '?';
             $product['buy_url'] .= $sep . CS_AFFILIATE_PARAM . '=' . urlencode(CS_AFFILIATE_ID);
         }
@@ -183,7 +240,7 @@ try {
     unset($product);
 
     echo json_encode([
-        'query'    => $_GET['q'],
+        'query'    => $q_normalised,
         'retailer' => $retailer,
         'total'    => count($products),
         'results'  => $products,

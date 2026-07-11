@@ -48,4 +48,9 @@ class TescoAdapter implements RetailerAdapter
 
         throw new RuntimeException('TescoAdapter not yet implemented — awaiting official API key');
     }
+
+    public function addToBasket(string $product_id, int $quantity): ?array
+    {
+        return null; // basket integration not yet available
+    }
 }

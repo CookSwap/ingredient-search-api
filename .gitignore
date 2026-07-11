@@ -1,0 +1,15 @@
+# Dependencies
+vendor/
+node_modules/
+
+# Secrets
+.env
+*.env
+.env.*
+
+# Test/demo page — never commit; contains pre-filled API key and password gate
+proxy/api-test.php
+
+# OS noise
+.DS_Store
+Thumbs.db

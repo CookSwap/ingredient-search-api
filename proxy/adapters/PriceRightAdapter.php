@@ -97,7 +97,7 @@ class PriceRightAdapter implements RetailerAdapter
             'name'     => $p['name'],
             'brand'    => $p['brand'],
             'unit'     => $p['unit'],
-            'price'    => ['amount' => $p['price'], 'currency' => 'GBP', 'unit_price' => $p['unit_price']],
+            'price'    => ['amount_minor' => (int)round($p['price'] * 100), 'currency' => 'GBP', 'unit_price' => $p['unit_price']],
             'in_stock' => $p['in_stock'],
             'tags'     => $p['tags'],
             'buy_url'  => 'https://www.priceright-demo.com/shop/' . strtolower($p['id']),

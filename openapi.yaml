@@ -44,6 +44,10 @@ security:
 tags:
   - name: Products
     description: Ingredient-to-product search
+  - name: Basket
+    description: >
+      Optional basket handoff. Retailers must explicitly support this — recipe
+      apps must fall back to buy_url when absent or returning 501.
   - name: System
     description: Health and status
 
@@ -145,6 +149,19 @@ paths:
   /basket/add:
     post:
       summary: Add a product to the user's basket
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >
+            Optional client-generated UUID. If the same key is received within
+            60 seconds, the retailer should return the original checkout_url
+            rather than creating a new basket. Prevents duplicate baskets on
+            network retry.
+          schema:
+            type: string
+            format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
       description: >
         Adds a single product to the retailer's basket and returns a one-time
         checkout URL. The calling app redirects the user to that URL — they
@@ -268,8 +285,11 @@ components:
           example: AU
         total:
           type: integer
-          description: Total matching products — may exceed the results array length
-          example: 14
+          description: >
+            Number of products returned in this response. Equals results array
+            length. Not a full catalogue count — pagination (offset/cursor) is
+            a future addition.
+          example: 3
         results:
           type: array
           items:
@@ -328,6 +348,10 @@ components:
               - vegetarian
               - gluten-free
               - dairy-free
+              - halal
+              - kosher
+              - keto
+              - pescatarian
 
     Price:
       type: object

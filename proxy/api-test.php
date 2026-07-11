@@ -335,7 +335,7 @@ function renderResult(status, ms, url, json) {
       <div class="result-card">
         <div class="rc-name">${esc(r.name)}</div>
         <div class="rc-brand">${esc(r.brand || '')}</div>
-        ${r.price && r.price.amount ? `<div class="rc-price" style="color:${accentColor}">£${Number(r.price.amount).toFixed(2)}</div>` : ''}
+        ${r.price && r.price.amount_minor != null ? `<div class="rc-price" style="color:${accentColor}">£${(r.price.amount_minor / 100).toFixed(2)}</div>` : ''}
         <div class="rc-unit">${esc(r.unit || '')}${r.price&&r.price.unit_price?' · '+esc(r.price.unit_price):''}</div>
         <div class="rc-stock ${r.in_stock ? 'in' : 'out'}">${r.in_stock ? '✓ In stock' : '✗ Out of stock'}</div>
         ${tags ? `<div style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:3px;">${tags}</div>` : ''}
